@@ -3,69 +3,91 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Accéléro-Synthé</title>
+    <title>TherapyFlow - Eau Immersive</title>
     <style>
-        body { font-family: sans-serif; text-align: center; padding: 50px; background: #121212; color: white; }
-        button { padding: 20px; font-size: 1.2rem; cursor: pointer; background: #00ff88; border: none; border-radius: 8px; }
-        .data { margin-top: 20px; font-mono: monospace; color: #00ff88; }
+        body { font-family: 'Segoe UI', sans-serif; text-align: center; background: #001a2c; color: #a9def9; padding: 20px; }
+        #visual { width: 150px; height: 150px; border-radius: 50%; background: radial-gradient(#00f2fe, #001a2c); margin: 20px auto; transition: transform 0.1s; }
+        button { padding: 20px 40px; font-size: 1.2rem; cursor: pointer; background: #4cc9f0; border: none; border-radius: 50px; color: #001a2c; font-weight: bold; box-shadow: 0 0 20px rgba(76, 201, 240, 0.4); }
     </style>
 </head>
 <body>
-    <h1>Phone Synth</h1>
-    <button id="start">ACTIVER LE SON</button>
-    <div class="data" id="output">Bougez votre téléphone...</div>
+    <h1>Immersion Aquatique</h1>
+    <div id="visual"></div>
+    <button id="start">COMMENCER LA SÉANCE</button>
+    <p id="info">Bougez lentement comme dans l'eau...</p>
 
     <script>
-        let audioCtx;
-        let oscillator;
-        let gainNode;
+        let audioCtx, filter, gainNode;
+        let lastMag = 0;
 
-        const startBtn = document.getElementById('start');
-        const output = document.getElementById('output');
-
-        startBtn.addEventListener('click', () => {
-            // Initialisation de l'audio (nécessite un clic utilisateur)
+        document.getElementById('start').addEventListener('click', async () => {
             if (!audioCtx) {
                 audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                oscillator = audioCtx.createOscillator();
-                gainNode = audioCtx.createGain();
-
-                oscillator.connect(gainNode);
-                gainNode.connect(audioCtx.destination);
-
-                oscillator.type = 'sine'; // Son pur
-                oscillator.start();
-                gainNode.gain.value = 0.1; // Volume faible par sécurité
                 
-                // Demander la permission pour iOS (obligatoire depuis iOS 13)
-                if (typeof DeviceMotionEvent.requestPermission === 'function') {
-                    DeviceMotionEvent.requestPermission()
-                        .then(response => {
-                            if (response == 'granted') window.addEventListener('devicemotion', handleMotion);
-                        })
-                        .catch(console.error);
-                } else {
-                    window.addEventListener('devicemotion', handleMotion);
+                // 1. Source : Bruit de fond (Pink Noise pour l'eau)
+                const bufferSize = 2 * audioCtx.sampleRate;
+                const noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+                const output = noiseBuffer.getChannelData(0);
+                let lastOut = 0;
+                for (let i = 0; i < bufferSize; i++) {
+                    const white = Math.random() * 2 - 1;
+                    output[i] = (lastOut + (0.02 * white)) / 1.02; // Filtrage simple pour bruit rose
+                    lastOut = output[i];
                 }
-                startBtn.innerText = "SON ACTIF";
+
+                const noise = audioCtx.createBufferSource();
+                noise.buffer = noiseBuffer;
+                noise.loop = true;
+
+                // 2. Filtre (L'élément clé pour l'effet "sous l'eau")
+                filter = audioCtx.createBiquadFilter();
+                filter.type = 'lowpass';
+                filter.frequency.value = 400; // Son étouffé par défaut
+                filter.Q.value = 5; // Résonance pour simuler le sifflement de l'eau
+
+                gainNode = audioCtx.createGain();
+                gainNode.gain.value = 0; // Silence au début
+
+                noise.connect(filter);
+                filter.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
+                noise.start();
+
+                // Gestion des permissions iOS
+                if (typeof DeviceMotionEvent.requestPermission === 'function') {
+                    const resp = await DeviceMotionEvent.requestPermission();
+                    if (resp === 'granted') window.addEventListener('devicemotion', updateSound);
+                } else {
+                    window.addEventListener('devicemotion', updateSound);
+                }
+                document.getElementById('start').style.display = 'none';
             }
         });
 
-        function handleMotion(event) {
-            const acc = event.accelerationIncludingGravity;
-            
-            // On récupère l'accélération sur l'axe X (souvent entre -10 et 10)
-            let x = acc.x || 0;
-            
-            // MAPPING : On transforme -10/10 en fréquence 200Hz/1000Hz
-            // Formule simpliste : fréquence = 200 + (valeur_absolue_de_X * 80)
-            let freq = 200 + (Math.abs(x) * 80);
-            
-            if (oscillator) {
-                oscillator.frequency.setTargetAtTime(freq, audioCtx.currentTime, 0.1);
-            }
+        function updateSound(event) {
+            const acc = event.acceleration; // Accélération sans gravité
+            if (!acc.x) return;
 
-            output.innerText = `Accélération X: ${x.toFixed(2)} \n Fréquence: ${Math.round(freq)} Hz`;
+            // Calcul de la magnitude du mouvement (Force G)
+            let mag = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
+            
+            // Lissage inspiré de la publication (Butterworth simplifié)
+            // On amortit les changements brusques pour garder la dynamique "gait"
+            let smoothedMag = lastMag * 0.9 + mag * 0.1; 
+            lastMag = smoothedMag;
+
+            // MAPPING THERAPEUTIQUE
+            // 1. Le volume dépend de l'intensité du mouvement (0.1 à 0.8)
+            let volume = Math.min(0.8, smoothedMag / 5);
+            gainNode.gain.setTargetAtTime(volume + 0.05, audioCtx.currentTime, 0.1);
+
+            // 2. La clarté (filtre) dépend de la vitesse
+            // On simule le passage de l'air/eau : plus on bouge, plus on entend les hautes fréquences
+            let cutoff = 300 + (smoothedMag * 200);
+            filter.frequency.setTargetAtTime(Math.min(3000, cutoff), audioCtx.currentTime, 0.1);
+
+            // Visuel
+            document.getElementById('visual').style.transform = `scale(${1 + volume})`;
         }
     </script>
 </body>
