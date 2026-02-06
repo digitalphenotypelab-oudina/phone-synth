@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Accéléro-Synthé</title>
+    <style>
+        body { font-family: sans-serif; text-align: center; padding: 50px; background: #121212; color: white; }
+        button { padding: 20px; font-size: 1.2rem; cursor: pointer; background: #00ff88; border: none; border-radius: 8px; }
+        .data { margin-top: 20px; font-mono: monospace; color: #00ff88; }
+    </style>
+</head>
+<body>
+    <h1>Phone Synth</h1>
+    <button id="start">ACTIVER LE SON</button>
+    <div class="data" id="output">Bougez votre téléphone...</div>
+
+    <script>
+        let audioCtx;
+        let oscillator;
+        let gainNode;
+
+        const startBtn = document.getElementById('start');
+        const output = document.getElementById('output');
+
+        startBtn.addEventListener('click', () => {
+            // Initialisation de l'audio (nécessite un clic utilisateur)
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                oscillator = audioCtx.createOscillator();
+                gainNode = audioCtx.createGain();
+
+                oscillator.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
+
+                oscillator.type = 'sine'; // Son pur
+                oscillator.start();
+                gainNode.gain.value = 0.1; // Volume faible par sécurité
+                
+                // Demander la permission pour iOS (obligatoire depuis iOS 13)
+                if (typeof DeviceMotionEvent.requestPermission === 'function') {
+                    DeviceMotionEvent.requestPermission()
+                        .then(response => {
+                            if (response == 'granted') window.addEventListener('devicemotion', handleMotion);
+                        })
+                        .catch(console.error);
+                } else {
+                    window.addEventListener('devicemotion', handleMotion);
+                }
+                startBtn.innerText = "SON ACTIF";
+            }
+        });
+
+        function handleMotion(event) {
+            const acc = event.accelerationIncludingGravity;
+            
+            // On récupère l'accélération sur l'axe X (souvent entre -10 et 10)
+            let x = acc.x || 0;
+            
+            // MAPPING : On transforme -10/10 en fréquence 200Hz/1000Hz
+            // Formule simpliste : fréquence = 200 + (valeur_absolue_de_X * 80)
+            let freq = 200 + (Math.abs(x) * 80);
+            
+            if (oscillator) {
+                oscillator.frequency.setTargetAtTime(freq, audioCtx.currentTime, 0.1);
+            }
+
+            output.innerText = `Accélération X: ${x.toFixed(2)} \n Fréquence: ${Math.round(freq)} Hz`;
+        }
+    </script>
+</body>
+</html>
