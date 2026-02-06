@@ -16,7 +16,7 @@
     <div id="interface">
         <h1>Sensation Aquatique</h1>
         <button id="btn">ENTRER DANS L'EAU</button>
-        <p id="msg">Assurez-vous que 'water.wav' est bien dans le dossier.</p>
+        <p id="msg">Assurez-vous que 'water.mp3' est bien dans le dossier.</p>
     </div>
 
     <script>
@@ -29,7 +29,7 @@
             audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             
             // Chargement du fichier MP3
-            const response = await fetch('water.wav');
+            const response = await fetch('water.mp3');
             const arrayBuffer = await response.arrayBuffer();
             const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
 
