@@ -3,101 +3,215 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Immersion Aquatique Pro</title>
+    <title>Hydro-Challenge Immersion</title>
     <style>
-        body { margin: 0; background: #000428; color: white; font-family: 'Segoe UI', sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; overflow: hidden; }
-        #interface { text-align: center; z-index: 10; pointer-events: none; }
-        button { padding: 25px 50px; border-radius: 60px; border: none; background: #4cc9f0; color: #000428; font-weight: bold; font-size: 1.4rem; cursor: pointer; box-shadow: 0 0 30px rgba(76, 201, 240, 0.6); pointer-events: auto; }
-        #visual { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: radial-gradient(circle, #4361ee 0%, #000428 100%); opacity: 0.2; transition: opacity 0.1s; }
-        #loader { display: none; margin-top: 20px; color: #4cc9f0; }
+        body { margin: 0; background: #000428; color: white; font-family: 'Segoe UI', sans-serif; text-align: center; transition: background-color 0.3s; }
+        .screen { display: none; height: 100vh; flex-direction: column; align-items: center; justify-content: center; position: relative; overflow: hidden; }
+        .active { display: flex; }
+        
+        button { padding: 15px 35px; margin: 10px; border-radius: 50px; border: none; background: #4cc9f0; color: #000428; font-weight: bold; font-size: 1.1rem; cursor: pointer; z-index: 10; box-shadow: 0 4px 15px rgba(0,0,0,0.3); }
+        
+        #score-display { font-size: 6rem; margin: 10px; color: #fff; text-shadow: 0 0 20px rgba(76, 201, 240, 0.8); transition: transform 0.2s; }
+        .score-pop { transform: scale(1.4); color: #f72585 !important; }
+        
+        #timer-display { font-size: 2rem; font-weight: bold; margin-bottom: 20px; }
+        
+        #visual-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: radial-gradient(circle, #4361ee 0%, #000428 100%); opacity: 0.2; pointer-events: none; z-index: 1; }
+        
+        .leaderboard { background: rgba(255,255,255,0.05); padding: 20px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.1); margin-top: 20px; }
+        #loader { display: none; font-style: italic; color: #4cc9f0; margin-top: 10px; }
     </style>
 </head>
 <body>
-    <div id="visual"></div>
-    <div id="interface">
-        <button id="btn">COMMENCER L'IMMERSION</button>
-        <div id="loader">Chargement de l'eau...</div>
+
+    <div id="screen-home" class="screen active">
+        <h1>HYDRO-CHALLENGE</h1>
+        <button onclick="startMode('libre')">NAGE LIBRE</button>
+        <button onclick="startMode('defi')">DÉFI 1 MINUTE</button>
+        <div id="loader">Immersion en cours...</div>
+        <div class="leaderboard">
+            <h3>Top 3 Scores</h3>
+            <div id="best-scores">Aucun score</div>
+        </div>
+    </div>
+
+    <div id="screen-game" class="screen">
+        <div id="visual-layer"></div>
+        <div id="timer-display">--:--</div>
+        <div id="score-display">0</div>
+        <p style="z-index:10">MOUVEMENTS</p>
+        <button onclick="stopGame()" style="background:#f72585; color:white;">QUITTER</button>
     </div>
 
     <script>
         let audioCtx, source, filter, gainNode;
-        let isPlaying = false;
-        let lastMag = 0;
+        let sounds = {};
+        let score = 0;
+        let timeLeft = 60;
+        let isGaming = false;
+        let canScore = true;
+        let timerInterval;
+        let goal5Intensity = 0.5;
 
-        const btn = document.getElementById('btn');
-        const loader = document.getElementById('loader');
+        async function loadSound(url) {
+            const resp = await fetch(url);
+            if (!resp.ok) throw new Error(`Fichier manquant : ${url}`);
+            return await audioCtx.decodeAudioData(await resp.arrayBuffer());
+        }
 
-        btn.addEventListener('click', async () => {
-            if (isPlaying) return;
-            
-            btn.style.display = 'none';
-            loader.style.display = 'block';
-
-            try {
+        async function initAudio() {
+            if (!audioCtx) {
                 audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                document.getElementById('loader').style.display = 'block';
                 
-                const response = await fetch('water.mp3');
-                const arrayBuffer = await response.arrayBuffer();
-                const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+                try {
+                    const [waterB, g5B, g10B, g20B] = await Promise.all([
+                        loadSound('water.mp3'),
+                        loadSound('goal5.mp3'),
+                        loadSound('goal10.mp3'),
+                        loadSound('goal20.mp3')
+                    ]);
+                    sounds = { water: waterB, goal5: g5B, goal10: g10B, goal20: g20B };
+                } catch (e) {
+                    alert(e.message);
+                    return false;
+                }
 
                 source = audioCtx.createBufferSource();
-                source.buffer = audioBuffer;
+                source.buffer = sounds.water;
                 source.loop = true;
-
                 filter = audioCtx.createBiquadFilter();
                 filter.type = 'lowpass';
-                filter.frequency.value = 200; // Très sourd au repos
-
                 gainNode = audioCtx.createGain();
-                gainNode.gain.value = 0.05; // Quasiment silencieux au repos
-
-                source.connect(filter);
-                filter.connect(gainNode);
-                gainNode.connect(audioCtx.destination);
-
+                source.connect(filter).connect(gainNode).connect(audioCtx.destination);
                 source.start();
-                isPlaying = true;
-                loader.innerText = "PRÊT : BOUGEZ VOTRE MAIN";
-
-                if (typeof DeviceMotionEvent.requestPermission === 'function') {
-                    const res = await DeviceMotionEvent.requestPermission();
-                    if (res === 'granted') window.addEventListener('devicemotion', handleMovement);
-                } else {
-                    window.addEventListener('devicemotion', handleMovement);
-                }
-            } catch (e) {
-                loader.innerText = "Erreur de chargement. Vérifiez water.mp3";
-                console.error(e);
             }
-        });
+            return true;
+        }
 
-        function handleMovement(event) {
+        function playReward(buffer, vol) {
+            const rSource = audioCtx.createBufferSource();
+            const rGain = audioCtx.createGain();
+            rSource.buffer = buffer;
+            rGain.gain.value = vol;
+            rSource.connect(rGain).connect(audioCtx.destination);
+            rSource.start();
+        }
+
+        async function startMode(m) {
+            const ok = await initAudio();
+            if (!ok) return;
+
+            score = 0;
+            goal5Intensity = 0.5;
+            document.getElementById('score-display').innerText = "0";
+            
+            if (typeof DeviceMotionEvent.requestPermission === 'function') {
+                await DeviceMotionEvent.requestPermission();
+            }
+            window.addEventListener('devicemotion', handleMotion);
+
+            document.getElementById('screen-home').classList.remove('active');
+            document.getElementById('screen-game').classList.add('active');
+            isGaming = true;
+
+            if (m === 'defi') {
+                timeLeft = 60;
+                timerInterval = setInterval(() => {
+                    timeLeft--;
+                    document.getElementById('timer-display').innerText = `0:${timeLeft < 10 ? '0'+timeLeft : timeLeft}`;
+                    if (timeLeft <= 0) endGame();
+                }, 1000);
+            } else {
+                document.getElementById('timer-display').innerText = "Nage Libre";
+            }
+        }
+
+        function handleMotion(event) {
+            if (!isGaming) return;
             const acc = event.acceleration;
             if (!acc || !acc.x) return;
 
-            // 1. Calcul de la puissance du mouvement (Magnitude)
             let mag = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
-            
-            // 2. Lissage pour éviter les craquements (Filtre de transition)
-            let smoothedMag = lastMag * 0.85 + mag * 0.15;
-            lastMag = smoothedMag;
 
-            // 3. MAPPING RÉALISTE
-            // Volume : de 0.05 (repos) à 1.2 (mouvement fort)
-            let targetGain = Math.max(0.05, Math.min(1.2, smoothedMag / 4));
-            gainNode.gain.setTargetAtTime(targetGain, audioCtx.currentTime, 0.05);
+            // Ambiance eau
+            let tGain = Math.max(0.05, Math.min(1.2, mag / 5));
+            gainNode.gain.setTargetAtTime(tGain, audioCtx.currentTime, 0.05);
+            filter.frequency.setTargetAtTime(200 + (mag * 400), audioCtx.currentTime, 0.1);
 
-            // Fréquence (Clarté) : plus on bouge, plus on entend les bulles du MP3
-            let cutoff = 200 + (smoothedMag * 600);
-            filter.frequency.setTargetAtTime(Math.min(3500, cutoff), audioCtx.currentTime, 0.1);
-
-            // Vitesse de lecture : l'eau s'agite avec la vitesse
-            let rate = 0.9 + (smoothedMag / 25);
-            source.playbackRate.setTargetAtTime(Math.min(1.3, rate), audioCtx.currentTime, 0.1);
-
-            // 4. Feedback Visuel
-            document.getElementById('visual').style.opacity = 0.1 + (targetGain * 0.8);
+            // Détection point (seuil 15)
+            if (mag > 15 && canScore) {
+                score++;
+                triggerPointEffects(score);
+                canScore = false;
+                setTimeout(() => { canScore = true; }, 600);
+            }
         }
+
+        function triggerPointEffects(s) {
+            const el = document.getElementById('score-display');
+            const layer = document.getElementById('visual-layer');
+            el.innerText = s;
+
+            // Animation de base du chiffre
+            el.classList.add('score-pop');
+            setTimeout(() => el.classList.remove('score-pop'), 200);
+
+            // Logique des paliers sonores et visuels
+            if (s === 10) {
+                playReward(sounds.goal10, 0.9);
+                flashScreen('#4cc9f0'); // Flash Bleu clair
+                goal5Intensity += 0.2;
+            } else if (s === 20) {
+                playReward(sounds.goal20, 1.0);
+                flashScreen('#f72585'); // Flash Rose/Violet
+                goal5Intensity += 0.2;
+            } else if (s % 5 === 0) {
+                playReward(sounds.goal5, goal5Intensity);
+                flashScreen('#4361ee'); // Flash Bleu profond
+            }
+            
+            if (navigator.vibrate) navigator.vibrate(50);
+        }
+
+        function flashScreen(color) {
+            document.body.style.backgroundColor = color;
+            setTimeout(() => {
+                document.body.style.backgroundColor = "#000428";
+            }, 300);
+        }
+
+        function stopGame() {
+            isGaming = false;
+            clearInterval(timerInterval);
+            if (gainNode) gainNode.gain.setTargetAtTime(0, audioCtx.currentTime, 0.1);
+            window.removeEventListener('devicemotion', handleMotion);
+            document.getElementById('screen-game').classList.remove('active');
+            document.getElementById('screen-home').classList.add('active');
+            displayLeaderboard();
+        }
+
+        function endGame() {
+            isGaming = false;
+            clearInterval(timerInterval);
+            saveScore(score);
+            alert(`Temps écoulé ! Score : ${score}`);
+            stopGame();
+        }
+
+        function saveScore(s) {
+            let scs = JSON.parse(localStorage.getItem('hydroScores') || "[]");
+            scs.push(s);
+            scs.sort((a,b) => b-a);
+            localStorage.setItem('hydroScores', JSON.stringify(scs.slice(0,3)));
+        }
+
+        function displayLeaderboard() {
+            let scs = JSON.parse(localStorage.getItem('hydroScores') || "[]");
+            document.getElementById('best-scores').innerHTML = scs.length ? scs.map((s,i)=>`${i+1}. ${s} mouvements`).join('<br>') : "Aucun score";
+        }
+
+        displayLeaderboard();
     </script>
 </body>
 </html>
