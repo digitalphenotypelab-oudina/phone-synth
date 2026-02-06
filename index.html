@@ -3,113 +3,82 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hydro-Sensation Open Source</title>
+    <title>Eau Thérapeutique</title>
     <style>
-        body { font-family: 'Helvetica Neue', sans-serif; text-align: center; background: radial-gradient(circle, #004e92, #000428); color: #fff; height: 100vh; margin: 0; display: flex; flex-direction: column; justify-content: center; }
-        .container { padding: 20px; }
-        button { padding: 25px 50px; font-size: 1.5rem; cursor: pointer; background: #00d2ff; border: none; border-radius: 50px; color: #fff; font-weight: bold; box-shadow: 0 10px 30px rgba(0, 210, 255, 0.5); transition: 0.3s; }
-        button:active { transform: scale(0.95); }
-        #status { margin-top: 30px; font-weight: 200; letter-spacing: 2px; opacity: 0.8; }
-        .wave { width: 100px; height: 100px; border: 2px solid #fff; border-radius: 50%; margin: 20px auto; opacity: 0; }
+        body { margin: 0; background: #000428; color: white; font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; overflow: hidden; }
+        #interface { text-align: center; z-index: 10; }
+        button { padding: 20px 40px; border-radius: 50px; border: none; background: #00d2ff; color: #000428; font-weight: bold; font-size: 1.2rem; cursor: pointer; box-shadow: 0 0 20px #00d2ff; }
+        #visual { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: radial-gradient(circle, #004e92 0%, #000428 100%); transition: opacity 0.5s; opacity: 0.5; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>NAGE IMMERSIVE</h1>
-        <button id="startBtn">PLONGER</button>
-        <div id="status">APPAREIL PRÊT</div>
-        <div id="wave" class="wave"></div>
+    <div id="visual"></div>
+    <div id="interface">
+        <h1>Sensation Aquatique</h1>
+        <button id="btn">ENTRER DANS L'EAU</button>
+        <p id="msg">Assurez-vous que 'water.wav' est bien dans le dossier.</p>
     </div>
 
     <script>
-        let audioCtx, masterGain, lowFilter, highFilter;
-        let lastMag = 0;
+        let audioCtx, source, filter, gainNode;
+        let isPlaying = false;
 
-        document.getElementById('startBtn').addEventListener('click', async () => {
-            if (!audioCtx) {
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                
-                // --- CRÉATION DU BRUIT D'EAU RÉALISTE ---
-                const bufferSize = audioCtx.sampleRate * 2;
-                const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
-                const data = buffer.getChannelData(0);
-                
-                // Algorithme de bruit "Eau/Bulles"
-                for (let i = 0; i < bufferSize; i++) {
-                    // Mélange de bruit blanc et d'impulsions aléatoires pour l'aspect organique
-                    const white = Math.random() * 2 - 1;
-                    data[i] = white * 0.5; 
-                }
+        document.getElementById('btn').addEventListener('click', async () => {
+            if (isPlaying) return;
 
-                const source = audioCtx.createBufferSource();
-                source.buffer = buffer;
-                source.loop = true;
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            
+            // Chargement du fichier MP3
+            const response = await fetch('water.wav');
+            const arrayBuffer = await response.arrayBuffer();
+            const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
 
-                // Chaîne de traitement pour la profondeur (le "corps" de l'eau)
-                lowFilter = audioCtx.createBiquadFilter();
-                lowFilter.type = 'lowpass';
-                lowFilter.frequency.value = 200; 
+            source = audioCtx.createBufferSource();
+            source.buffer = audioBuffer;
+            source.loop = true;
 
-                // Chaîne pour le scintillement (les bulles en surface)
-                highFilter = audioCtx.createBiquadFilter();
-                highFilter.type = 'bandpass';
-                highFilter.frequency.value = 1500;
-                highFilter.Q.value = 10;
+            // Filtre pour l'effet "profondeur"
+            filter = audioCtx.createBiquadFilter();
+            filter.type = 'lowpass';
+            filter.frequency.value = 400;
 
-                masterGain = audioCtx.createGain();
-                masterGain.gain.value = 0;
+            gainNode = audioCtx.createGain();
+            gainNode.gain.value = 0.5;
 
-                // Connexions
-                source.connect(lowFilter);
-                source.connect(highFilter);
-                lowFilter.connect(masterGain);
-                highFilter.connect(masterGain);
-                masterGain.connect(audioCtx.destination);
+            source.connect(filter);
+            filter.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
 
-                source.start();
+            source.start();
+            isPlaying = true;
+            document.getElementById('btn').style.display = 'none';
 
-                // Permissions capteurs
-                if (typeof DeviceMotionEvent.requestPermission === 'function') {
-                    const permission = await DeviceMotionEvent.requestPermission();
-                    if (permission === 'granted') window.addEventListener('devicemotion', processMotion);
-                } else {
-                    window.addEventListener('devicemotion', processMotion);
-                }
-
-                document.getElementById('startBtn').innerText = "IMMERSION ACTIVE";
-                document.getElementById('status').innerText = "ÉCOUTEZ VOS MOUVEMENTS";
+            // Activation des capteurs
+            if (typeof DeviceMotionEvent.requestPermission === 'function') {
+                const res = await DeviceMotionEvent.requestPermission();
+                if (res === 'granted') window.addEventListener('devicemotion', handleMovement);
+            } else {
+                window.addEventListener('devicemotion', handleMovement);
             }
         });
 
-        function processMotion(event) {
+        function handleMovement(event) {
             const acc = event.acceleration;
-            if (!acc.x) return;
+            const rot = event.accelerationIncludingGravity; // Pour l'inclinaison
 
-            // Magnitude brute
-            let mag = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
-            
-            // Lissage dynamique (le fameux filtre 6Hz adapté)
-            let smoothedMag = lastMag * 0.85 + mag * 0.15;
-            lastMag = smoothedMag;
+            // 1. Vitesse de mouvement = Vitesse de l'eau
+            let speed = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
+            let playbackRate = 0.8 + (speed / 10); 
+            source.playbackRate.setTargetAtTime(Math.min(1.5, playbackRate), audioCtx.currentTime, 0.1);
 
-            // --- SONIFICATION RÉALISTE ---
-            
-            // 1. Volume général basé sur l'énergie du mouvement
-            let targetGain = Math.min(1.2, smoothedMag / 3);
-            masterGain.gain.setTargetAtTime(targetGain + 0.05, audioCtx.currentTime, 0.1);
+            // 2. Inclinaison (Axe Z ou Y) = Profondeur
+            // Si le téléphone pointe vers le bas, on filtre les aigus (immersion totale)
+            let depth = Math.abs(rot.z); 
+            let cutoff = 200 + (depth * 400); 
+            filter.frequency.setTargetAtTime(Math.min(2000, cutoff), audioCtx.currentTime, 0.1);
 
-            // 2. Le "Low Pass" s'ouvre avec la vitesse : donne l'effet de résistance de l'eau
-            let lowFreq = 150 + (smoothedMag * 150);
-            lowFilter.frequency.setTargetAtTime(Math.min(800, lowFreq), audioCtx.currentTime, 0.2);
-
-            // 3. Le "Band Pass" (Bulles) : réagit aux accélérations soudaines
-            let highFreq = 1200 + (mag * 300);
-            highFilter.frequency.setTargetAtTime(Math.min(3000, highFreq), audioCtx.currentTime, 0.05);
-
-            // Visuel : Cercle qui pulse avec l'eau
-            const wave = document.getElementById('wave');
-            wave.style.opacity = targetGain;
-            wave.style.transform = `scale(${1 + targetGain * 2})`;
+            // 3. Feedback visuel
+            document.getElementById('visual').style.opacity = 0.3 + (speed / 15);
         }
     </script>
 </body>
