@@ -3,23 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hydro-Challenge Immersion</title>
+    <title>Hydro-Challenge Immersion Pro</title>
     <style>
-        body { margin: 0; background: #000428; color: white; font-family: 'Segoe UI', sans-serif; text-align: center; transition: background-color 0.3s; }
-        .screen { display: none; height: 100vh; flex-direction: column; align-items: center; justify-content: center; position: relative; overflow: hidden; }
+        body { margin: 0; background: #000428; color: white; font-family: 'Segoe UI', sans-serif; text-align: center; transition: background-color 0.3s; overflow: hidden; }
+        .screen { display: none; height: 100vh; flex-direction: column; align-items: center; justify-content: center; position: relative; }
         .active { display: flex; }
         
-        button { padding: 15px 35px; margin: 10px; border-radius: 50px; border: none; background: #4cc9f0; color: #000428; font-weight: bold; font-size: 1.1rem; cursor: pointer; z-index: 10; box-shadow: 0 4px 15px rgba(0,0,0,0.3); }
+        button { padding: 18px 40px; margin: 10px; border-radius: 50px; border: none; background: #4cc9f0; color: #000428; font-weight: bold; font-size: 1.2rem; cursor: pointer; z-index: 10; box-shadow: 0 4px 20px rgba(0,210,255,0.4); }
         
-        #score-display { font-size: 6rem; margin: 10px; color: #fff; text-shadow: 0 0 20px rgba(76, 201, 240, 0.8); transition: transform 0.2s; }
-        .score-pop { transform: scale(1.4); color: #f72585 !important; }
+        #score-display { font-size: 7rem; margin: 5px; color: #fff; text-shadow: 0 0 25px rgba(76, 201, 240, 0.9); transition: transform 0.2s; z-index: 10; }
+        .score-pop { transform: scale(1.3); color: #f72585 !important; }
         
-        #timer-display { font-size: 2rem; font-weight: bold; margin-bottom: 20px; }
+        #timer-display { font-size: 2.5rem; font-weight: bold; margin-bottom: 15px; z-index: 10; }
         
-        #visual-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: radial-gradient(circle, #4361ee 0%, #000428 100%); opacity: 0.2; pointer-events: none; z-index: 1; }
+        #visual-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: radial-gradient(circle, #4361ee 0%, #000428 100%); opacity: 0.3; pointer-events: none; z-index: 1; }
         
-        .leaderboard { background: rgba(255,255,255,0.05); padding: 20px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.1); margin-top: 20px; }
-        #loader { display: none; font-style: italic; color: #4cc9f0; margin-top: 10px; }
+        .leaderboard { background: rgba(255,255,255,0.05); padding: 25px; border-radius: 25px; border: 1px solid rgba(255,255,255,0.1); margin-top: 20px; min-width: 250px; }
+        #loader { display: none; font-style: italic; color: #4cc9f0; margin: 15px; }
     </style>
 </head>
 <body>
@@ -28,10 +28,10 @@
         <h1>HYDRO-CHALLENGE</h1>
         <button onclick="startMode('libre')">NAGE LIBRE</button>
         <button onclick="startMode('defi')">DÉFI 1 MINUTE</button>
-        <div id="loader">Immersion en cours...</div>
+        <div id="loader">Chargement des sons...</div>
         <div class="leaderboard">
-            <h3>Top 3 Scores</h3>
-            <div id="best-scores">Aucun score</div>
+            <h3>Top 3 Meilleurs Scores</h3>
+            <div id="best-scores">Aucun score enregistré</div>
         </div>
     </div>
 
@@ -39,23 +39,24 @@
         <div id="visual-layer"></div>
         <div id="timer-display">--:--</div>
         <div id="score-display">0</div>
-        <p style="z-index:10">MOUVEMENTS</p>
-        <button onclick="stopGame()" style="background:#f72585; color:white;">QUITTER</button>
+        <p style="z-index:10; letter-spacing: 2px;">MOUVEMENTS</p>
+        <button onclick="stopGame()" style="background:#f72585; color:white; margin-top: 30px;">QUITTER</button>
     </div>
 
     <script>
-        let audioCtx, source, filter, gainNode;
+        let audioCtx, source, filter, gainNode, compressor;
         let sounds = {};
         let score = 0;
         let timeLeft = 60;
         let isGaming = false;
         let canScore = true;
         let timerInterval;
-        let goal5Intensity = 0.5;
+        let goal5Intensity = 0.4; // Volume de départ des encouragements
 
+        // Chargement sécurisé des fichiers
         async function loadSound(url) {
             const resp = await fetch(url);
-            if (!resp.ok) throw new Error(`Fichier manquant : ${url}`);
+            if (!resp.ok) throw new Error(`Fichier introuvable : ${url}`);
             return await audioCtx.decodeAudioData(await resp.arrayBuffer());
         }
 
@@ -73,17 +74,29 @@
                     ]);
                     sounds = { water: waterB, goal5: g5B, goal10: g10B, goal20: g20B };
                 } catch (e) {
-                    alert(e.message);
+                    alert("Erreur : " + e.message);
+                    document.getElementById('loader').style.display = 'none';
                     return false;
                 }
 
+                // Chaîne Audio : Source -> Filtre -> Gain -> Compresseur -> Sortie
                 source = audioCtx.createBufferSource();
                 source.buffer = sounds.water;
                 source.loop = true;
+
                 filter = audioCtx.createBiquadFilter();
                 filter.type = 'lowpass';
+                filter.frequency.value = 300;
+
                 gainNode = audioCtx.createGain();
-                source.connect(filter).connect(gainNode).connect(audioCtx.destination);
+                gainNode.gain.value = 0.5;
+
+                compressor = audioCtx.createDynamicsCompressor();
+                // Paramètres pour "remonter" un son d'eau trop faible
+                compressor.threshold.setValueAtTime(-24, audioCtx.currentTime);
+                compressor.ratio.setValueAtTime(12, audioCtx.currentTime);
+
+                source.connect(filter).connect(gainNode).connect(compressor).connect(audioCtx.destination);
                 source.start();
             }
             return true;
@@ -99,12 +112,13 @@
         }
 
         async function startMode(m) {
-            const ok = await initAudio();
-            if (!ok) return;
+            const ready = await initAudio();
+            if (!ready) return;
 
             score = 0;
-            goal5Intensity = 0.5;
+            goal5Intensity = 0.4;
             document.getElementById('score-display').innerText = "0";
+            document.getElementById('loader').style.display = 'none';
             
             if (typeof DeviceMotionEvent.requestPermission === 'function') {
                 await DeviceMotionEvent.requestPermission();
@@ -117,14 +131,17 @@
 
             if (m === 'defi') {
                 timeLeft = 60;
-                timerInterval = setInterval(() => {
-                    timeLeft--;
-                    document.getElementById('timer-display').innerText = `0:${timeLeft < 10 ? '0'+timeLeft : timeLeft}`;
-                    if (timeLeft <= 0) endGame();
-                }, 1000);
+                document.getElementById('timer-display').innerText = "1:00";
+                timerInterval = setInterval(updateTimer, 1000);
             } else {
                 document.getElementById('timer-display').innerText = "Nage Libre";
             }
+        }
+
+        function updateTimer() {
+            timeLeft--;
+            document.getElementById('timer-display').innerText = `0:${timeLeft < 10 ? '0'+timeLeft : timeLeft}`;
+            if (timeLeft <= 0) endGame();
         }
 
         function handleMotion(event) {
@@ -134,57 +151,52 @@
 
             let mag = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
 
-            // Ambiance eau
-            let tGain = Math.max(0.05, Math.min(1.2, mag / 5));
-            gainNode.gain.setTargetAtTime(tGain, audioCtx.currentTime, 0.05);
-            filter.frequency.setTargetAtTime(200 + (mag * 400), audioCtx.currentTime, 0.1);
+            // Mixage eau : Gain plus sensible pour compenser le fichier non-normalisé
+            let tGain = Math.max(0.5, Math.min(2.5, mag / 2.5));
+            gainNode.gain.setTargetAtTime(tGain, audioCtx.currentTime, 0.1);
+            filter.frequency.setTargetAtTime(300 + (mag * 500), audioCtx.currentTime, 0.1);
 
-            // Détection point (seuil 15)
+            // Détection du mouvement (Crawl/Brasse)
             if (mag > 15 && canScore) {
                 score++;
                 triggerPointEffects(score);
                 canScore = false;
-                setTimeout(() => { canScore = true; }, 600);
+                setTimeout(() => { canScore = true; }, 650); 
             }
         }
 
         function triggerPointEffects(s) {
             const el = document.getElementById('score-display');
-            const layer = document.getElementById('visual-layer');
             el.innerText = s;
-
-            // Animation de base du chiffre
             el.classList.add('score-pop');
-            setTimeout(() => el.classList.remove('score-pop'), 200);
+            setTimeout(() => el.classList.remove('score-pop'), 250);
 
-            // Logique des paliers sonores et visuels
+            // Paliers de récompenses
             if (s === 10) {
-                playReward(sounds.goal10, 0.9);
-                flashScreen('#4cc9f0'); // Flash Bleu clair
-                goal5Intensity += 0.2;
+                playReward(sounds.goal10, 0.6); // Volume modéré
+                flashScreen('#4cc9f0');
+                goal5Intensity += 0.15;
             } else if (s === 20) {
-                playReward(sounds.goal20, 1.0);
-                flashScreen('#f72585'); // Flash Rose/Violet
-                goal5Intensity += 0.2;
+                playReward(sounds.goal20, 0.7);
+                flashScreen('#f72585');
+                goal5Intensity += 0.15;
             } else if (s % 5 === 0) {
                 playReward(sounds.goal5, goal5Intensity);
-                flashScreen('#4361ee'); // Flash Bleu profond
+                flashScreen('#4361ee');
             }
             
-            if (navigator.vibrate) navigator.vibrate(50);
+            if (navigator.vibrate) navigator.vibrate(60);
         }
 
         function flashScreen(color) {
             document.body.style.backgroundColor = color;
-            setTimeout(() => {
-                document.body.style.backgroundColor = "#000428";
-            }, 300);
+            setTimeout(() => { document.body.style.backgroundColor = "#000428"; }, 350);
         }
 
         function stopGame() {
             isGaming = false;
             clearInterval(timerInterval);
-            if (gainNode) gainNode.gain.setTargetAtTime(0, audioCtx.currentTime, 0.1);
+            if (gainNode) gainNode.gain.setTargetAtTime(0, audioCtx.currentTime, 0.5);
             window.removeEventListener('devicemotion', handleMotion);
             document.getElementById('screen-game').classList.remove('active');
             document.getElementById('screen-home').classList.add('active');
@@ -192,10 +204,8 @@
         }
 
         function endGame() {
-            isGaming = false;
-            clearInterval(timerInterval);
             saveScore(score);
-            alert(`Temps écoulé ! Score : ${score}`);
+            alert(`Fin du temps ! Score final : ${score}`);
             stopGame();
         }
 
@@ -208,7 +218,8 @@
 
         function displayLeaderboard() {
             let scs = JSON.parse(localStorage.getItem('hydroScores') || "[]");
-            document.getElementById('best-scores').innerHTML = scs.length ? scs.map((s,i)=>`${i+1}. ${s} mouvements`).join('<br>') : "Aucun score";
+            document.getElementById('best-scores').innerHTML = scs.length ? 
+                scs.map((s,i)=>`<b>${i+1}.</b> ${s} mouvements`).join('<br>') : "Aucun score";
         }
 
         displayLeaderboard();
